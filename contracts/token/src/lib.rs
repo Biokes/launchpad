@@ -86,8 +86,16 @@ impl TokenContract {
         Self::_mint(&env, &to, amount);
     }
 
-    /// Burn `amount` tokens from `from`. Admin only.
+    /// Burn `amount` tokens from `from`. Owner only (standard burn).
     pub fn burn(env: Env, from: Address, amount: i128) {
+        Self::_check_paused(&env);
+        from.require_auth();
+        assert!(amount > 0, "amount must be positive");
+        Self::_burn(&env, &from, amount);
+    }
+
+    /// Forced burn of `amount` tokens from `from`. Admin only.
+    pub fn burn_admin(env: Env, from: Address, amount: i128) {
         Self::_check_paused(&env);
         Self::_require_admin(&env);
         assert!(amount > 0, "amount must be positive");
@@ -137,6 +145,20 @@ impl TokenContract {
      env.storage().persistent().remove(&DataKey::Frozen(addr.clone()));
      env.events().publish((symbol_short!("freeze"), addr), false);
  }
+
+/// Pause the contract, halting all state-changing operations. Admin only.
+pub fn pause(env: Env) {
+    Self::_require_admin(&env);
+    env.storage().instance().set(&DataKey::IsPaused, &true);
+    env.events().publish((symbol_short!("pause"),), true);
+}
+
+/// Unpause the contract. Admin only.
+pub fn unpause(env: Env) {
+    Self::_require_admin(&env);
+    env.storage().instance().remove(&DataKey::IsPaused);
+    env.events().publish((symbol_short!("pause"),), false);
+}
 
 /// Pause the contract, halting all state-changing operations. Admin only.
 pub fn pause(env: Env) {
