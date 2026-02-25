@@ -2,6 +2,7 @@ import { Control, useWatch } from "react-hook-form";
 import { CopyButton } from "@/components/ui/CopyButton";
 
 interface StepProps {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     control: Control<any>;
 }
 
