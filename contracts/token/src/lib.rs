@@ -16,6 +16,7 @@ pub enum DataKey {
     Decimals,
     TotalSupply,
     MaxSupply,
+    ContractUri,
     Balance(Address),
     Allowance(Address, Address), // (owner, spender)
     Frozen(Address),
@@ -160,19 +161,12 @@ pub fn unpause(env: Env) {
     env.events().publish((symbol_short!("pause"),), false);
 }
 
-/// Pause the contract, halting all state-changing operations. Admin only.
-pub fn pause(env: Env) {
-    Self::_require_admin(&env);
-    env.storage().instance().set(&DataKey::IsPaused, &true);
-    env.events().publish((symbol_short!("pause"),), true);
-}
-
-/// Unpause the contract. Admin only.
-pub fn unpause(env: Env) {
-    Self::_require_admin(&env);
-    env.storage().instance().remove(&DataKey::IsPaused);
-    env.events().publish((symbol_short!("pause"),), false);
-}
+    /// Set or update the contract URI pointing to off-chain metadata JSON.
+    /// Admin only.
+    pub fn update_contract_uri(env: Env, uri: String) {
+        Self::_require_admin(&env);
+        env.storage().instance().set(&DataKey::ContractUri, &uri);
+    }
 
     // ── Token operations ────────────────────────────────────────────────
 
@@ -260,6 +254,13 @@ pub fn unpause(env: Env) {
     /// Returns `true` if the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage().instance().get(&DataKey::IsPaused).unwrap_or(false)
+    }
+
+    pub fn contract_uri(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractUri)
+            .expect("contract URI not set")
     }
 
     // ── Internal helpers ────────────────────────────────────────────────
@@ -747,5 +748,30 @@ mod test {
             &2_000_0000000i128,
             &Some(1_000_0000000i128),
         );
+    }
+
+    #[test]
+    fn test_update_and_get_contract_uri() {
+        let (env, client, _, _) = setup();
+        let uri = String::from_str(&env, "https://example.com/token-metadata.json");
+        client.update_contract_uri(&uri);
+        assert_eq!(client.contract_uri(), uri);
+    }
+
+    #[test]
+    fn test_update_contract_uri_overwrites() {
+        let (env, client, _, _) = setup();
+        let uri_a = String::from_str(&env, "https://example.com/a.json");
+        let uri_b = String::from_str(&env, "https://example.com/b.json");
+        client.update_contract_uri(&uri_a);
+        client.update_contract_uri(&uri_b);
+        assert_eq!(client.contract_uri(), uri_b);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract URI not set")]
+    fn test_contract_uri_not_set() {
+        let (_, client, _, _) = setup();
+        client.contract_uri();
     }
 }
