@@ -18,6 +18,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000"
+  ),
   title: "SoroPad — Soroban Token Launchpad",
   description:
     "Deploy and manage SEP-41 compliant tokens on Stellar Soroban. No code required.",
@@ -39,17 +42,17 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
       >
-        <SettingsProvider>
         <NetworkProvider>
-          <WalletProvider>
-            {/* ── Navbar ──────────────────────────────────────────── */}
-            <Navbar />
+          <SettingsProvider>
+            <WalletProvider>
+              {/* ── Navbar ──────────────────────────────────────────── */}
+              <Navbar />
 
-            {/* Mainnet Warning Banner */}
-            <MainnetWarning />
+              {/* Mainnet Warning Banner */}
+              <MainnetWarning />
 
-            {/* Page content offset for fixed nav */}
-            <main className="pt-16">{children}</main>
+              {/* Page content offset for fixed nav */}
+              <main className="pt-16">{children}</main>
 
             {/* ── Footer ─────────────────────────────────────────── */}
             <footer className="border-t border-white/5 py-8 text-center text-sm text-gray-500">
@@ -66,9 +69,10 @@ export default function RootLayout({
                 · MIT License
               </p>
             </footer>
-          </WalletProvider>
+            </WalletProvider>
+          </SettingsProvider>
         </NetworkProvider>
-        </SettingsProvider>
+
       </body>
     </html>
   );

@@ -15,10 +15,13 @@ pub enum DataKey {
     Symbol,
     Decimals,
     TotalSupply,
+    TotalBurned,
     MaxSupply,
+    ContractUri,
     Balance(Address),
     Allowance(Address, Address), // (owner, spender)
     Frozen(Address),
+    IsPaused,
 }
 
 // ---------------------------------------------------------------------------
@@ -69,23 +72,30 @@ impl TokenContract {
             Self::_mint(&env, &admin, initial_supply);
         }
 
-        env.events().publish(
-            (symbol_short!("init"),),
-            admin,
-        );
+        env.events().publish((symbol_short!("init"),), admin);
     }
 
     // ── Admin actions ───────────────────────────────────────────────────
 
     /// Mint `amount` tokens to `to`. Admin only.
     pub fn mint(env: Env, to: Address, amount: i128) {
+        Self::_check_paused(&env);
         Self::_require_admin(&env);
         assert!(amount > 0, "amount must be positive");
         Self::_mint(&env, &to, amount);
     }
 
-    /// Burn `amount` tokens from `from`. Admin only.
+    /// Burn `amount` tokens from `from`. Owner only (standard burn).
     pub fn burn(env: Env, from: Address, amount: i128) {
+        Self::_check_paused(&env);
+        from.require_auth();
+        assert!(amount > 0, "amount must be positive");
+        Self::_burn(&env, &from, amount);
+    }
+
+    /// Forced burn of `amount` tokens from `from`. Admin only.
+    pub fn burn_admin(env: Env, from: Address, amount: i128) {
+        Self::_check_paused(&env);
         Self::_require_admin(&env);
         assert!(amount > 0, "amount must be positive");
         Self::_burn(&env, &from, amount);
@@ -95,7 +105,9 @@ impl TokenContract {
     /// The new admin must call `accept_admin` to finalize the transfer.
     pub fn propose_admin(env: Env, new_admin: Address) {
         Self::_require_admin(&env);
-        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
     }
 
     /// Accept the admin role. Must be called by the pending admin.
@@ -110,35 +122,59 @@ impl TokenContract {
         env.storage().instance().remove(&DataKey::PendingAdmin);
     }
 
-   /// Transfer admin role instantly.
-/// TODO (issue #2): replace with two-step propose_admin / accept_admin.
-pub fn set_admin(env: Env, new_admin: Address) {
-    Self::_require_admin(&env);
-    env.storage().instance().set(&DataKey::Admin, &new_admin);
-    env.events().publish(
-        (symbol_short!("set_admin"),),
-        new_admin,
-    );
-}
+    /// Transfer admin role instantly.
+    /// TODO (issue #2): replace with two-step propose_admin / accept_admin.
+    pub fn set_admin(env: Env, new_admin: Address) {
+        Self::_require_admin(&env);
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.events()
+            .publish((symbol_short!("set_admin"),), new_admin);
+    }
 
-/// Freeze an account, preventing it from sending tokens. Admin only.
-pub fn freeze_account(env: Env, addr: Address) {
-    Self::_require_admin(&env);
-    env.storage().persistent().set(&DataKey::Frozen(addr.clone()), &true);
-    env.events().publish((symbol_short!("freeze"), addr), true);
-}
+    /// Freeze an account, preventing it from sending tokens. Admin only.
+    pub fn freeze_account(env: Env, addr: Address) {
+        Self::_require_admin(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Frozen(addr.clone()), &true);
+        env.events().publish((symbol_short!("freeze"), addr), true);
+    }
 
-/// Unfreeze a previously frozen account. Admin only.
-pub fn unfreeze_account(env: Env, addr: Address) {
-    Self::_require_admin(&env);
-    env.storage().persistent().remove(&DataKey::Frozen(addr.clone()));
-    env.events().publish((symbol_short!("freeze"), addr), false);
-}
+    /// Unfreeze a previously frozen account. Admin only.
+    pub fn unfreeze_account(env: Env, addr: Address) {
+        Self::_require_admin(&env);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Frozen(addr.clone()));
+        env.events().publish((symbol_short!("freeze"), addr), false);
+    }
+
+    /// Pause the contract, halting all state-changing operations. Admin only.
+    pub fn pause(env: Env) {
+        Self::_require_admin(&env);
+        env.storage().instance().set(&DataKey::IsPaused, &true);
+        env.events().publish((symbol_short!("pause"),), true);
+    }
+
+    /// Unpause the contract. Admin only.
+    pub fn unpause(env: Env) {
+        Self::_require_admin(&env);
+        env.storage().instance().remove(&DataKey::IsPaused);
+        env.events().publish((symbol_short!("pause"),), false);
+    }
+
+    /// Set or update the contract URI pointing to off-chain metadata JSON.
+    /// Admin only.
+    pub fn update_contract_uri(env: Env, uri: String) {
+        Self::_require_admin(&env);
+        env.storage().instance().set(&DataKey::ContractUri, &uri);
+    }
 
     // ── Token operations ────────────────────────────────────────────────
 
     /// Transfer `amount` from `from` to `to`. Caller must be `from`.
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        Self::_check_paused(&env);
         from.require_auth();
         assert!(amount > 0, "amount must be positive");
         assert!(!Self::_is_frozen(&env, &from), "account is frozen");
@@ -147,21 +183,26 @@ pub fn unfreeze_account(env: Env, addr: Address) {
     }
 
     /// Approve `spender` to spend up to `amount` on behalf of `from`.
-    pub fn approve(env: Env, from: Address, spender: Address, amount: i128, _expiration_ledger: u32) {
+    pub fn approve(
+        env: Env,
+        from: Address,
+        spender: Address,
+        amount: i128,
+        _expiration_ledger: u32,
+    ) {
         from.require_auth();
         assert!(amount >= 0, "amount must be non-negative");
 
         let key = DataKey::Allowance(from.clone(), spender.clone());
         env.storage().persistent().set(&key, &amount);
 
-        env.events().publish(
-            (symbol_short!("approve"), from, spender),
-            amount,
-        );
+        env.events()
+            .publish((symbol_short!("approve"), from, spender), amount);
     }
 
     /// Transfer `amount` from `from` to `to` using `spender`'s allowance.
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        Self::_check_paused(&env);
         spender.require_auth();
         assert!(amount > 0, "amount must be positive");
         assert!(!Self::_is_frozen(&env, &from), "account is frozen");
@@ -188,50 +229,116 @@ pub fn unfreeze_account(env: Env, addr: Address) {
     }
 
     pub fn admin(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
     }
 
     pub fn decimals(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::Decimals).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Decimals)
+            .expect("not initialized")
     }
 
     pub fn name(env: Env) -> String {
-        env.storage().instance().get(&DataKey::Name).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Name)
+            .expect("not initialized")
     }
 
     pub fn symbol(env: Env) -> String {
-        env.storage().instance().get(&DataKey::Symbol).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Symbol)
+            .expect("not initialized")
     }
 
     pub fn total_supply(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0)
+    }
+
+    pub fn total_burned(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalBurned)
+            .unwrap_or(0)
     }
 
     /// Returns `true` if the given address is frozen.
     pub fn is_frozen(env: Env, addr: Address) -> bool {
-        env.storage().persistent().get(&DataKey::Frozen(addr)).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Frozen(addr))
+            .unwrap_or(false)
     }
-  
+
     pub fn max_supply(env: Env) -> Option<i128> {
         env.storage().instance().get(&DataKey::MaxSupply)
+    }
+
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false)
+    }
+
+    pub fn contract_uri(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractUri)
+            .expect("contract URI not set")
     }
 
     // ── Internal helpers ────────────────────────────────────────────────
 
     fn _require_admin(env: &Env) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
     }
 
     fn _is_frozen(env: &Env, addr: &Address) -> bool {
-        env.storage().persistent().get(&DataKey::Frozen(addr.clone())).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Frozen(addr.clone()))
+            .unwrap_or(false)
+    }
+
+    fn _check_paused(env: &Env) {
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::IsPaused)
+            .unwrap_or(false)
+        {
+            panic!("contract is paused");
+        }
     }
 
     fn _mint(env: &Env, to: &Address, amount: i128) {
-        let supply: i128 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
+        let supply: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0);
         let new_supply = supply + amount;
 
-        if let Some(cap) = env.storage().instance().get::<DataKey, i128>(&DataKey::MaxSupply) {
+        if let Some(cap) = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::MaxSupply)
+        {
             assert!(new_supply <= cap, "mint would exceed max_supply");
         }
 
@@ -239,9 +346,12 @@ pub fn unfreeze_account(env: Env, addr: Address) {
         let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         env.storage().persistent().set(&key, &(balance + amount));
 
-        env.storage().instance().set(&DataKey::TotalSupply, &new_supply);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &new_supply);
 
-        env.events().publish((symbol_short!("mint"), to.clone()), amount);
+        env.events()
+            .publish((symbol_short!("mint"), to.clone()), amount);
     }
 
     fn _burn(env: &Env, from: &Address, amount: i128) {
@@ -250,10 +360,26 @@ pub fn unfreeze_account(env: Env, addr: Address) {
         assert!(balance >= amount, "insufficient balance to burn");
         env.storage().persistent().set(&key, &(balance - amount));
 
-        let supply: i128 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply - amount));
+        let supply: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(supply - amount));
 
-        env.events().publish((symbol_short!("burn"), from.clone()), amount);
+        let burned: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalBurned)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalBurned, &(burned + amount));
+
+        env.events()
+            .publish((symbol_short!("burn"), from.clone()), amount);
     }
 
     fn _transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
@@ -263,10 +389,14 @@ pub fn unfreeze_account(env: Env, addr: Address) {
         let from_balance: i128 = env.storage().persistent().get(&from_key).unwrap_or(0);
         assert!(from_balance >= amount, "insufficient balance");
 
-        env.storage().persistent().set(&from_key, &(from_balance - amount));
+        env.storage()
+            .persistent()
+            .set(&from_key, &(from_balance - amount));
 
         let to_balance: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
-        env.storage().persistent().set(&to_key, &(to_balance + amount));
+        env.storage()
+            .persistent()
+            .set(&to_key, &(to_balance + amount));
 
         env.events().publish(
             (symbol_short!("transfer"), from.clone(), to.clone()),
@@ -336,7 +466,10 @@ mod test {
         let (_, client, admin, user) = setup();
         client.mint(&user, &500_0000000i128);
         assert_eq!(client.balance(&user), 500_0000000i128);
-        assert_eq!(client.total_supply(), 1_000_000_0000000i128 + 500_0000000i128);
+        assert_eq!(
+            client.total_supply(),
+            1_000_000_0000000i128 + 500_0000000i128
+        );
         // admin balance unchanged
         assert_eq!(client.balance(&admin), 1_000_000_0000000i128);
     }
@@ -345,8 +478,54 @@ mod test {
     fn test_burn() {
         let (_, client, admin, _) = setup();
         client.burn(&admin, &100_0000000i128);
-        assert_eq!(client.balance(&admin), 1_000_000_0000000i128 - 100_0000000i128);
-        assert_eq!(client.total_supply(), 1_000_000_0000000i128 - 100_0000000i128);
+        assert_eq!(
+            client.balance(&admin),
+            1_000_000_0000000i128 - 100_0000000i128
+        );
+        assert_eq!(
+            client.total_supply(),
+            1_000_000_0000000i128 - 100_0000000i128
+        );
+    }
+
+    #[test]
+    fn test_total_burned_starts_at_zero() {
+        let (_, client, _, _) = setup();
+        assert_eq!(client.total_burned(), 0i128);
+    }
+
+    #[test]
+    fn test_total_burned_after_single_burn() {
+        let (_, client, admin, _) = setup();
+        client.burn(&admin, &100_0000000i128);
+        assert_eq!(client.total_burned(), 100_0000000i128);
+    }
+
+    #[test]
+    fn test_total_burned_after_two_burns() {
+        let (_, client, admin, _) = setup();
+        client.burn(&admin, &100_0000000i128);
+        client.burn(&admin, &250_0000000i128);
+        assert_eq!(client.total_burned(), 350_0000000i128);
+    }
+
+    #[test]
+    fn test_burn_updates_total_burned_and_total_supply_each_time() {
+        let (_, client, admin, _) = setup();
+
+        client.burn(&admin, &100_0000000i128);
+        assert_eq!(client.total_burned(), 100_0000000i128);
+        assert_eq!(
+            client.total_supply(),
+            1_000_000_0000000i128 - 100_0000000i128
+        );
+
+        client.burn(&admin, &250_0000000i128);
+        assert_eq!(client.total_burned(), 350_0000000i128);
+        assert_eq!(
+            client.total_supply(),
+            1_000_000_0000000i128 - 350_0000000i128
+        );
     }
 
     #[test]
@@ -360,7 +539,10 @@ mod test {
     fn test_transfer() {
         let (_, client, admin, user) = setup();
         client.transfer(&admin, &user, &250_0000000i128);
-        assert_eq!(client.balance(&admin), 1_000_000_0000000i128 - 250_0000000i128);
+        assert_eq!(
+            client.balance(&admin),
+            1_000_000_0000000i128 - 250_0000000i128
+        );
         assert_eq!(client.balance(&user), 250_0000000i128);
         // total supply unchanged
         assert_eq!(client.total_supply(), 1_000_000_0000000i128);
@@ -384,7 +566,10 @@ mod test {
         client.transfer_from(&spender, &admin, &user, &60_0000000i128);
         assert_eq!(client.allowance(&admin, &spender), 40_0000000i128);
         assert_eq!(client.balance(&user), 60_0000000i128);
-        assert_eq!(client.balance(&admin), 1_000_000_0000000i128 - 60_0000000i128);
+        assert_eq!(
+            client.balance(&admin),
+            1_000_000_0000000i128 - 60_0000000i128
+        );
     }
 
     #[test]
@@ -432,7 +617,7 @@ mod test {
         client.mint(&user, &1i128);
         assert_eq!(client.admin(), admin);
     }
-  
+
     // ── Freeze / Unfreeze tests ─────────────────────────────────────────
 
     #[test]
@@ -496,24 +681,126 @@ mod test {
             &String::from_str(&env, "TestToken"),
             &String::from_str(&env, "TST"),
             &0i128,
+            &None,
         );
 
         // Remove mock — only user will auth, not admin.
-        env.mock_auths(&[
-            soroban_sdk::testutils::MockAuth {
-                address: &user,
-                invoke: &soroban_sdk::testutils::MockAuthInvoke {
-                    contract: &contract_id,
-                    fn_name: "freeze_account",
-                    args: (&user,).into_val(&env),
-                    sub_invokes: &[],
-                },
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &user,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "freeze_account",
+                args: (&user,).into_val(&env),
+                sub_invokes: &[],
             },
-        ]);
+        }]);
         // Should panic — user is not admin.
         client.freeze_account(&user);
     }
-    // ── max_supply tests ────────────────────────────────────────────────    
+
+    // ── Pause / Unpause tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_pause_and_is_paused() {
+        let (_, client, _, _) = setup();
+        assert!(!client.is_paused());
+        client.pause();
+        assert!(client.is_paused());
+        client.unpause();
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_paused_mint_blocked() {
+        let (_, client, _, user) = setup();
+        client.pause();
+        client.mint(&user, &1000i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_paused_burn_blocked() {
+        let (_, client, admin, _) = setup();
+        client.pause();
+        client.burn(&admin, &1000i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_paused_transfer_blocked() {
+        let (_, client, admin, user) = setup();
+        client.pause();
+        client.transfer(&admin, &user, &1000i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_paused_transfer_from_blocked() {
+        let (env, client, admin, user) = setup();
+        let spender = Address::generate(&env);
+        client.approve(&admin, &spender, &1000i128, &0u32);
+        client.pause();
+        client.transfer_from(&spender, &admin, &user, &500i128);
+    }
+
+    #[test]
+    fn test_unpause_restores_all_operations() {
+        let (_, client, admin, user) = setup();
+        client.pause();
+        client.unpause();
+
+        // All should succeed now
+        client.mint(&user, &1000i128);
+        client.burn(&user, &500i128);
+        client.transfer(&admin, &user, &1000i128);
+
+        assert_eq!(client.balance(&user), 1500i128);
+    }
+
+    #[test]
+    fn test_read_only_works_while_paused() {
+        let (_, client, admin, _) = setup();
+        client.pause();
+
+        // Read-only getters should still work
+        assert_eq!(client.total_supply(), 1_000_000_0000000i128);
+        assert_eq!(client.balance(&admin), 1_000_000_0000000i128);
+        assert!(client.is_paused());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_non_admin_cannot_pause() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, TokenContract);
+        let client = TokenContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.initialize(
+            &admin,
+            &7u32,
+            &String::from_str(&env, "TestToken"),
+            &String::from_str(&env, "TST"),
+            &0i128,
+            &None,
+        );
+
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &user,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "pause",
+                args: ().into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        client.pause();
+    }
+
+    // ── max_supply tests ────────────────────────────────────────────────
     fn setup_with_cap() -> (Env, TokenContractClient<'static>, Address, Address) {
         let env = Env::default();
         env.mock_all_auths();
@@ -589,5 +876,30 @@ mod test {
             &2_000_0000000i128,
             &Some(1_000_0000000i128),
         );
+    }
+
+    #[test]
+    fn test_update_and_get_contract_uri() {
+        let (env, client, _, _) = setup();
+        let uri = String::from_str(&env, "https://example.com/token-metadata.json");
+        client.update_contract_uri(&uri);
+        assert_eq!(client.contract_uri(), uri);
+    }
+
+    #[test]
+    fn test_update_contract_uri_overwrites() {
+        let (env, client, _, _) = setup();
+        let uri_a = String::from_str(&env, "https://example.com/a.json");
+        let uri_b = String::from_str(&env, "https://example.com/b.json");
+        client.update_contract_uri(&uri_a);
+        client.update_contract_uri(&uri_b);
+        assert_eq!(client.contract_uri(), uri_b);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract URI not set")]
+    fn test_contract_uri_not_set() {
+        let (_, client, _, _) = setup();
+        client.contract_uri();
     }
 }

@@ -17,10 +17,11 @@ import {
   submitTransaction,
   type VestingScheduleInfo,
 } from "@/lib/stellar";
-import { CopyButton } from "@/components/ui/CopyButton";
+// import { CopyButton } from "@/components/ui/CopyButton";
 import { useSoroban } from "@/hooks/useSoroban";
 import { useWallet } from "@/app/hooks/useWallet";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { ExplorerLink } from "@/components/ui/ExplorerLink";
 
 // ---------------------------------------------------------------------------
 // Vesting display (progress bars + timeline)
@@ -343,13 +344,14 @@ function VestingDisplay({
       {/* Recipient */}
       <div className="flex items-center gap-2 text-xs text-gray-500">
         <span>Recipient:</span>
-        <span className="font-mono text-gray-400">
-          {truncateAddress(schedule.recipient, 6)}
-        </span>
-        <CopyButton value={schedule.recipient} label="Copy wallet address" />
-        {schedule.revoked && (
-          <span className="text-red-400">(Revoked)</span>
-        )}
+        <ExplorerLink
+          type="account"
+          identifier={schedule.recipient}
+          truncate={true}
+          truncateChars={6}
+          showCopy={true}
+        />
+        {schedule.revoked && <span className="text-red-400">(Revoked)</span>}
       </div>
 
       {/* Admin Actions */}
@@ -447,7 +449,7 @@ export default function VestingProgress({ decimals }: { decimals: number }) {
     } finally {
       setLoading(false);
     }
-  }, [vestingContract, recipient]);
+  }, [vestingContract, recipient, fetchCurrentLedger, fetchVestingSchedule]);
 
   return (
     <div className="space-y-4">

@@ -45,6 +45,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     try {
       const storedRpc = localStorage.getItem(LS_RPC_KEY);
       const storedHorizon = localStorage.getItem(LS_HORIZON_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (storedRpc) setRpcUrlState(storedRpc);
       if (storedHorizon) setHorizonUrlState(storedHorizon);
     } catch {

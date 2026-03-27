@@ -17,6 +17,12 @@ export function useSoroban() {
     [networkConfig],
   );
 
+  const fetchTokenBalance = useCallback(
+    (contractId: string, accountId: string) =>
+      stellar.fetchTokenBalance(contractId, accountId, networkConfig),
+    [networkConfig],
+  );
+
   const fetchTopHolders = useCallback(
     (contractId: string, symbol?: string, issuer?: string, limit?: number) =>
       stellar.fetchTopHolders(contractId, networkConfig, symbol, issuer, limit),
@@ -44,13 +50,46 @@ export function useSoroban() {
     [networkConfig],
   );
 
+  const fetchAccountBalances = useCallback(
+    (publicKey: string) =>
+      stellar.fetchAccountBalances(publicKey, networkConfig),
+    [networkConfig],
+  );
+
+  const buildBurnTransaction = useCallback(
+    (tokenContractId: string, fromAddress: string, amount: string, decimals: number) =>
+      stellar.buildBurnTransaction(tokenContractId, fromAddress, amount, decimals, networkConfig),
+    [networkConfig],
+  );
+
+  const fetchTransactionHistory = useCallback(
+    (contractId: string) => stellar.fetchTransactionHistory(contractId, networkConfig),
+    [networkConfig],
+  );
+
+  const fetchAccountOperations = useCallback(
+    (accountId: string, cursor?: string, limit?: number) =>
+      stellar.fetchAccountOperations(accountId, cursor, limit),
+    [],
+  );
+
+  const submitTransaction = useCallback(
+    (signedXdr: string) => stellar.submitTransaction(signedXdr),
+    [],
+  );
   return useMemo(
     () => ({
       fetchTokenInfo,
+      fetchTokenBalance,
       fetchTopHolders,
       fetchCurrentLedger,
       fetchVestingSchedule,
       fetchSupplyBreakdown,
+      fetchAccountBalances,
+      fetchTransactionHistory,
+      fetchAccountOperations,
+      buildBurnTransaction,
+      submitTransaction,
       networkConfig,
       // Pass through formatting helpers which don't need config
       formatTokenAmount: stellar.formatTokenAmount,
@@ -58,10 +97,16 @@ export function useSoroban() {
     }),
     [
       fetchTokenInfo,
+      fetchTokenBalance,
       fetchTopHolders,
       fetchCurrentLedger,
       fetchVestingSchedule,
       fetchSupplyBreakdown,
+      fetchAccountBalances,
+      fetchTransactionHistory,
+      fetchAccountOperations,
+      buildBurnTransaction,
+      submitTransaction,
       networkConfig,
     ],
   );
