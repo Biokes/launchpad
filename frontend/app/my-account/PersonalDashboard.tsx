@@ -14,6 +14,7 @@ import {
   Flame,
   Droplets,
   ArrowRight,
+  CheckCircle2,
 } from "lucide-react";
 import { useWallet } from "../hooks/useWallet";
 import { useSoroban } from "@/hooks/useSoroban";
@@ -25,6 +26,8 @@ import {
   type VestingScheduleInfo,
   type TokenActivityInfo,
 } from "@/lib/stellar";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -366,9 +369,14 @@ function PersonalActivityTable({
 // ---------------------------------------------------------------------------
 
 export default function PersonalDashboard() {
-  const { connected, publicKey, connect } = useWallet();
-  const { fetchVestingSchedule, fetchCurrentLedger, fetchAccountBalances } =
-    useSoroban();
+  const { connected, publicKey, connect, signTransaction } = useWallet();
+  const {
+    fetchVestingSchedule,
+    fetchCurrentLedger,
+    fetchAccountBalances,
+    buildBurnTransaction,
+    submitTransaction
+  } = useSoroban();
 
   // Balances
   const [balances, setBalances] = useState<AccountBalance[]>([]);
@@ -393,6 +401,39 @@ export default function PersonalDashboard() {
 
   // Refreshing state
   const [refreshing, setRefreshing] = useState(false);
+
+  // Burn state
+  const [burnContractId, setBurnContractId] = useState("");
+  const [burnAmount, setBurnAmount] = useState("");
+  const [burnLoading, setBurnLoading] = useState(false);
+  const [burnSuccess, setBurnSuccess] = useState(false);
+  const [burnError, setBurnError] = useState<string | null>(null);
+
+  const handleBurn = async () => {
+    if (!publicKey || !burnContractId || !burnAmount) return;
+    setBurnLoading(true);
+    setBurnError(null);
+    setBurnSuccess(false);
+    try {
+      // For simplicity, we assume 7 decimals for now, as is standard for our tokens
+      // Improving this would involve fetching decimals first
+      const xdr = await buildBurnTransaction(burnContractId, publicKey, burnAmount, 7);
+      const signed = await signTransaction(xdr);
+
+      // Submit via Soroban hook
+      await submitTransaction(signed);
+
+      setBurnSuccess(true);
+      setBurnAmount("");
+      // Refresh balances to show the change
+      await loadBalances();
+    } catch (err) {
+      console.error("Burn failed:", err);
+      setBurnError(err instanceof Error ? err.message : "Burn transaction failed");
+    } finally {
+      setBurnLoading(false);
+    }
+  };
 
   // Fetch balances
   const loadBalances = useCallback(async () => {
@@ -596,6 +637,77 @@ export default function PersonalDashboard() {
             />
           </div>
         )}
+      </section>
+
+      {/* Burn Tokens Section */}
+      <section aria-label="Burn tokens" className="mb-10">
+        <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
+          Token Actions
+        </h2>
+        <div className="glass-card p-6 flex flex-col md:flex-row gap-6 hover:border-red-500/20 transition-all duration-300">
+          <div className="flex-1 space-y-4">
+            <div className="flex items-center gap-2 text-red-400 mb-2">
+              <Flame className="w-5 h-5" />
+              <h3 className="font-bold text-lg">Burn My Tokens</h3>
+            </div>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Permanently remove tokens from your balance. This action is irreversible and will reduce the total supply.
+            </p>
+
+            {burnError && (
+              <div className="p-3 bg-red-400/10 border border-red-400/20 rounded-lg flex items-center gap-2 text-red-400 text-xs">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{burnError}</span>
+              </div>
+            )}
+
+            {burnSuccess && (
+              <div className="p-3 bg-green-400/10 border border-green-400/20 rounded-lg flex items-center gap-2 text-green-400 text-xs">
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                <span>Tokens burned successfully! Your balance has been updated.</span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 space-y-4 bg-white/2 p-4 rounded-xl border border-white/5">
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1 block">Token Contract</label>
+                <select
+                  value={burnContractId}
+                  onChange={(e) => setBurnContractId(e.target.value)}
+                  className="w-full bg-void-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-stellar-400/50 outline-none"
+                >
+                  <option value="">Select a token...</option>
+                  {balances.filter(b => b.assetIssuer).map(b => (
+                    <option key={b.assetIssuer} value={b.assetIssuer}>{b.assetCode} ({truncateAddress(b.assetIssuer, 6)})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1 block">Amount to Burn</label>
+                <Input
+                  type="number"
+                  value={burnAmount}
+                  onChange={(e) => setBurnAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="bg-void-900 border-white/10"
+                />
+              </div>
+            </div>
+
+            <Button
+              onClick={handleBurn}
+              disabled={burnLoading || !burnContractId || !burnAmount}
+              className="w-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 transition-all group"
+              isLoading={burnLoading}
+            >
+              <Flame className="w-4 h-4 mr-2 group-hover:animate-pulse" />
+              Burn Tokens
+            </Button>
+          </div>
+        </div>
       </section>
 
       {/* Personal Transaction History */}
