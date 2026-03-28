@@ -86,23 +86,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [networkConfig.network],
   );
   
-  const [rpcUrl, setRpcUrlState] = useState(() => {
-    try {
-      const stored = localStorage.getItem(getRpcStorageKey(networkConfig.network));
-      return stored ?? defaultRpcUrl;
-    } catch {
-      return defaultRpcUrl;
-    }
-  });
-  
-  const [horizonUrl, setHorizonUrlState] = useState(() => {
-    try {
-      const stored = localStorage.getItem(getHorizonStorageKey(networkConfig.network));
-      return stored ?? defaultHorizonUrl;
-    } catch {
-      return defaultHorizonUrl;
-    }
-  });
+  const [rpcUrl, setRpcUrlState] = useState(defaultRpcUrl);
+  const [horizonUrl, setHorizonUrlState] = useState(defaultHorizonUrl);
 
   // Update URLs when network changes
   useEffect(() => {
@@ -110,17 +95,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       const storedRpc = localStorage.getItem(getRpcStorageKey(networkConfig.network));
       const storedHorizon = localStorage.getItem(getHorizonStorageKey(networkConfig.network));
       
-      if (storedRpc !== rpcUrl) {
-        setRpcUrlState(storedRpc ?? defaultRpcUrl);
-      }
-      if (storedHorizon !== horizonUrl) {
-        setHorizonUrlState(storedHorizon ?? defaultHorizonUrl);
-      }
+      setRpcUrlState(storedRpc ?? defaultRpcUrl);
+      setHorizonUrlState(storedHorizon ?? defaultHorizonUrl);
     } catch {
-      if (rpcUrl !== defaultRpcUrl) setRpcUrlState(defaultRpcUrl);
-      if (horizonUrl !== defaultHorizonUrl) setHorizonUrlState(defaultHorizonUrl);
+      setRpcUrlState(defaultRpcUrl);
+      setHorizonUrlState(defaultHorizonUrl);
     }
-  }, [networkConfig.network, defaultRpcUrl, defaultHorizonUrl, rpcUrl, horizonUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [networkConfig.network]);
 
   const setRpcUrl = useCallback((url: string) => {
     setRpcUrlState(url);

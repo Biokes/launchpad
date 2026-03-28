@@ -6,9 +6,6 @@ import { type NetworkConfig } from "../types/network";
 // ---------------------------------------------------------------------------
 const DEFAULT_HORIZON_URL =
   process.env.NEXT_PUBLIC_HORIZON_URL ?? "https://horizon-testnet.stellar.org";
-const DEFAULT_SOROBAN_RPC_URL =
-  process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ??
-  "https://soroban-testnet.stellar.org";
 const DEFAULT_MERCURY_BASE_URL_TESTNET =
   process.env.NEXT_PUBLIC_MERCURY_TESTNET_URL ??
   "https://testnet.mercurydata.app/rest";
