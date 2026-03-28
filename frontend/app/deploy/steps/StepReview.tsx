@@ -1,7 +1,7 @@
 import { Control, useWatch } from "react-hook-form";
 import { DeployFormData } from "../DeployForm";
-import { useWallet } from "@/hooks/useWallet";
-import { useNetwork } from "@/providers/NetworkProvider";
+import { useWallet } from "@/app/hooks/useWallet";
+import { useNetwork } from "@/app/providers/NetworkProvider";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
